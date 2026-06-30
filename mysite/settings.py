@@ -10,23 +10,29 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+load_dotenv()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-y$#ipgzhz=7pdizc$rrcxy%l&ujb1n_ns#uk_he+cfwed%rmn('
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
+DATABASE_PASSWORD = os.getenv('DB_PASSWORD')
 ALLOWED_HOSTS = []
 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000", 
+    "http://127.0.0.1:3000",
+]
 
 # Application definition
 
@@ -37,17 +43,22 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'knox',
+    'corsheaders',
     'register',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'mysite.middleware.TenantMiddleware',
 ]
 
 ROOT_URLCONF = 'mysite.urls'
@@ -67,6 +78,11 @@ TEMPLATES = [
     },
 ]
 
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': ('knox.auth.TokenAuthentication',),
+}
+
 WSGI_APPLICATION = 'mysite.wsgi.application'
 
 
@@ -76,12 +92,35 @@ WSGI_APPLICATION = 'mysite.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'master_registry', 
+        'NAME': 'master_registry',
         'USER': 'root',
-        'PASSWORD': 'Monika@24',
+        'PASSWORD': DATABASE_PASSWORD,
         'HOST': '127.0.0.1',
         'PORT': '3306',
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'CONN_HEALTH_CHECKS': False,
+        'CONN_MAX_AGE': 0,
+        'OPTIONS': {},
+        'TEST': {'NAME': None},
+        'TIME_ZONE': 'UTC',
+    },
+   'tenant': {  
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': '', 
+        'USER': 'root',
+        'PASSWORD': DATABASE_PASSWORD,
+        'HOST': '127.0.0.1',
+        'PORT': '3306',
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'CONN_HEALTH_CHECKS': False,
+        'CONN_MAX_AGE': 0,
+        'OPTIONS': {},
+        'TEST': {'NAME': None},
+        'TIME_ZONE': 'UTC',
     }
+    
 }
 
 
@@ -118,5 +157,5 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
-
+AUTH_USER_MODEL = 'register.User'
 STATIC_URL = 'static/'
