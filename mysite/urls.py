@@ -15,11 +15,34 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
-from register.views import RegisterCompanyView, LoginView
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from knox import views as knox_views
 
+# Import views directly from your register app
+from register.views import CompanyRegistrationView, TenantLoginView
+from parties.views import CustomerViewSet, ContactPersonViewSet
+
+# 1. Initialize the global DRF DefaultRouter
+router = DefaultRouter()
+router.register(r'customers', CustomerViewSet, basename='customer')
+router.register(r'contact-persons', ContactPersonViewSet, basename='contactperson')
+
+# (When you build your business_app/parties views later, you will register them here)
+# Example: router.register(r'customers', CustomerViewSet, basename='customer')
+
+# 2. Main URL Configuration
 urlpatterns = [
-   path('admin/', admin.site.urls),
-    path('api/register/', RegisterCompanyView.as_view()),
-    path('api/login/', LoginView.as_view(), name='login'),
+    path('admin/', admin.site.urls),
+    
+    # Unified API prefix handling both routers and direct paths
+    path('api/', include([
+        # Router endpoints (e.g., /api/customers/)
+        path('', include(router.urls)),
+        
+        # Authentication & Tenant Registration Endpoints
+        path('company-register/', CompanyRegistrationView.as_view(), name='company-register'),
+        path('login/', TenantLoginView.as_view(), name='tenant-login'),
+        path('logout/', knox_views.LogoutView.as_view(), name='knox_logout'),
+    ])),
 ]

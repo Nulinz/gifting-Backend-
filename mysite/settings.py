@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'knox',
     'corsheaders',
     'register',
+    'parties',
 ]
 
 MIDDLEWARE = [
@@ -58,7 +59,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'mysite.middleware.TenantMiddleware',
+    
 ]
 
 ROOT_URLCONF = 'mysite.urls'
@@ -89,37 +90,19 @@ WSGI_APPLICATION = 'mysite.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+
+DATABASE_ROUTERS = ['mysite.db_router.MasterTenantRouter']
+
 DATABASES = {
-    'default': {
+   'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'master_registry',
-        'USER': 'root',
-        'PASSWORD': DATABASE_PASSWORD,
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
-        'ATOMIC_REQUESTS': False,
-        'AUTOCOMMIT': True,
-        'CONN_HEALTH_CHECKS': False,
-        'CONN_MAX_AGE': 0,
-        'OPTIONS': {},
-        'TEST': {'NAME': None},
-        'TIME_ZONE': 'UTC',
-    },
-   'tenant': {  
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': '', 
-        'USER': 'root',
-        'PASSWORD': DATABASE_PASSWORD,
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
-        'ATOMIC_REQUESTS': False,
-        'AUTOCOMMIT': True,
-        'CONN_HEALTH_CHECKS': False,
-        'CONN_MAX_AGE': 0,
-        'OPTIONS': {},
-        'TEST': {'NAME': None},
-        'TIME_ZONE': 'UTC',
+        'NAME': 'master_registry',        
+        'USER': 'root',             
+        'PASSWORD': DATABASE_PASSWORD ,          
+        'HOST': '127.0.0.1',        
+        'PORT': '3306',             
     }
+  
     
 }
 
@@ -157,5 +140,7 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
-AUTH_USER_MODEL = 'register.User'
+
+AUTH_USER_MODEL = 'register.register_employee'
+
 STATIC_URL = 'static/'
