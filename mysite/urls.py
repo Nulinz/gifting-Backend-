@@ -21,12 +21,13 @@ from knox import views as knox_views
 
 # Import views directly from your register app
 from register.views import CompanyRegistrationView, TenantLoginView
-from parties.views import CustomerViewSet, ContactPersonViewSet
+from parties.views import CustomerViewSet, ContactPersonViewSet , VendorViewSet
 
 # 1. Initialize the global DRF DefaultRouter
 router = DefaultRouter()
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'contact-persons', ContactPersonViewSet, basename='contactperson')
+router.register(r'vendors', VendorViewSet, basename='vendor')
 
 # (When you build your business_app/parties views later, you will register them here)
 # Example: router.register(r'customers', CustomerViewSet, basename='customer')

@@ -51,15 +51,15 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware', 
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware', 
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    
+    'mysite.tenant_middleware.TenantDatabaseMiddleware', 
+
 ]
 
 ROOT_URLCONF = 'mysite.urls'
@@ -101,6 +101,13 @@ DATABASES = {
         'PASSWORD': DATABASE_PASSWORD ,          
         'HOST': '127.0.0.1',        
         'PORT': '3306',             
+    },'tenant': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'monika_db',   
+        'USER': 'root',         
+        'PASSWORD':  DATABASE_PASSWORD ,           
+        'HOST': '127.0.0.1',     
+        'PORT': '3306',         
     }
   
     

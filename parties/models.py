@@ -40,3 +40,30 @@ class address(models.Model):
     
     class Meta:
         db_table = 'parties_address'
+        
+class vendor(models.Model):
+    STATUS_CHOICES = [('Active', 'Active'), ('Inactive', 'Inactive')]
+    vendor_code = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    mobile = models.CharField(max_length=15)
+    gst_no = models.CharField(max_length=20, blank=True)
+    remarks = models.TextField(blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Active')
+    
+    class Meta:
+        db_table = 'parties_vendor'
+
+    def __str__(self):
+        return self.name
+
+class vendor_contact_person(models.Model):
+    vendor = models.ForeignKey(vendor, on_delete=models.CASCADE, related_name='contacts')
+    name = models.CharField(max_length=100)
+    department = models.CharField(max_length=50)
+    role = models.CharField(max_length=50)
+    email = models.EmailField()
+    mobile = models.CharField(max_length=15)
+    
+    class Meta:
+        db_table = 'parties_vendor_contact_person'
