@@ -18,16 +18,20 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from knox import views as knox_views
+from django.conf import settings
+from django.conf.urls.static import static
 
 # Import views directly from your register app
 from register.views import CompanyRegistrationView, TenantLoginView
-from parties.views import CustomerViewSet, ContactPersonViewSet , VendorViewSet
+from parties.views import (CustomerViewSet, ContactPersonViewSet , 
+VendorViewSet ,EmployeeViewSet)
 
 # 1. Initialize the global DRF DefaultRouter
 router = DefaultRouter()
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'contact-persons', ContactPersonViewSet, basename='contactperson')
 router.register(r'vendors', VendorViewSet, basename='vendor')
+router.register(r'employees', EmployeeViewSet, basename='employee')
 
 # (When you build your business_app/parties views later, you will register them here)
 # Example: router.register(r'customers', CustomerViewSet, basename='customer')
@@ -46,4 +50,4 @@ urlpatterns = [
         path('login/', TenantLoginView.as_view(), name='tenant-login'),
         path('logout/', knox_views.LogoutView.as_view(), name='knox_logout'),
     ])),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

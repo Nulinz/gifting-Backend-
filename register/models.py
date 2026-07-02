@@ -48,10 +48,11 @@ class register_employee_manager(BaseUserManager):
 
 
 class register_employee(AbstractBaseUser):
-    mobile_number = models.CharField(max_length=15, unique=True) # Used for logging in
+    mobile_number = models.CharField(max_length=15, unique=True) 
     employee_name = models.CharField(max_length=255)
     company_name = models.CharField(max_length=255)
     db_name = models.CharField(max_length=63)
+    role = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
 
     # Set login field to mobile_number

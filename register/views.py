@@ -68,13 +68,13 @@ class CompanyRegistrationView(generics.CreateAPIView):
                 )
 
                 # Create the owner profile as the first entry in the Master Employee table
-                register_employee.objects.create_user(
-                    mobile_number=data['mobile_number'],
-                    employee_name=data['full_name'],
-                    company_name=data['company_name'],
-                    db_name=db_name,
-                    password=data['password']
-                )
+                # register_employee.objects.create_user(
+                #     mobile_number=data['mobile_number'],
+                #     employee_name=data['full_name'],
+                #     company_name=data['company_name'],
+                #     db_name=db_name,
+                #     password=data['password']
+                # )
 
             # 2. FIXED: Create the database and migrate AFTER master records are safely committed
             provision_tenant_database(db_name)

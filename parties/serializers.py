@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from .models import customer, contact_person, address , vendor , vendor_contact_person
+from .models import (customer, contact_person, address , vendor ,
+vendor_contact_person, Employee , EmployeePermission)
+from register.models import register_employee
 from mysite.tenant_context import get_current_db_name
 from django.conf import settings
 from django.db import connections
@@ -21,7 +23,7 @@ class AddressSerializer(serializers.ModelSerializer):
 class ContactPersonSerializer(serializers.ModelSerializer):
     class Meta:
         model = contact_person
-        fields = ['id', 'name', 'department', 'role', 'email', 'mobile']
+        fields = ['id', 'name', 'department', 'role', 'email', 'mobile','status', 'created_by', 'created_at', 'updated_at']
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -30,8 +32,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = customer
-        fields = ['id', 'customer_code', 'name', 'email', 'mobile', 'gst_no', 'remarks', 'status', 'address', 'contacts']
-        # Disables automatic boot-time model-level default validation lookups
+        fields = ['id', 'customer_code', 'name', 'email', 'mobile', 'gst_no', 'remarks', 'status', 'created_by', 'created_at', 'updated_at', 'address', 'contacts']
         extra_kwargs = {
             'customer_code': {'validators': []},
             'email': {'validators': []}
@@ -40,8 +41,6 @@ class CustomerSerializer(serializers.ModelSerializer):
     def validate_customer_code(self, value):
         if not value:
             return value
-
-        
         request = self.context.get('request')
         active_db = 'default'
         
@@ -97,6 +96,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context.get('request')
         active_db = 'default'
+        creator_name = getattr(request.user, 'employee_name', 'System')
         
         if request and hasattr(request, 'user') and request.user.is_authenticated:
             user_db = getattr(request.user, 'db_name', None)
@@ -109,17 +109,25 @@ class CustomerSerializer(serializers.ModelSerializer):
             address_data = validated_data.pop('address')
             contacts_data = validated_data.pop('contacts', [])
             
-            customer_obj = customer.objects.db_manager(active_db).create(**validated_data)
+            customer_obj = customer.objects.db_manager(active_db).create(
+                created_by=creator_name, 
+                **validated_data
+            )
             customer_obj._state.db = active_db
 
             address.objects.db_manager(active_db).create(
                 entity_type='customer', 
                 entity_id=customer_obj.id, 
+                created_by=creator_name,
                 **address_data
             )
             
             for contact in contacts_data:
-                contact_person.objects.db_manager(active_db).create( customer_id=customer_obj.id,**contact)
+                contact_person.objects.db_manager(active_db).create(
+                    customer_id=customer_obj.id, 
+                    created_by=creator_name, 
+                    **contact
+                )
                 
             # Explicitly force the instance to remember its database connection
             customer_obj._state.db = active_db
@@ -185,7 +193,7 @@ class VendorSerializer(TenantSerializerMixin, serializers.ModelSerializer):
 
     class Meta:
         model = vendor
-        fields = ['id', 'vendor_code', 'name', 'email', 'mobile', 'gst_no', 'remarks', 'status', 'address', 'contacts']
+        fields = ['id', 'vendor_code', 'name', 'email', 'mobile', 'gst_no', 'remarks', 'status', 'created_by', 'created_at', 'updated_at','address', 'contacts']
         extra_kwargs = {
             'vendor_code': {'validators': []},
             'email': {'validators': []}
@@ -248,8 +256,9 @@ class VendorSerializer(TenantSerializerMixin, serializers.ModelSerializer):
         return value
     
     def create(self, validated_data):
-        # 1. Get the real database name
+        request = self.context.get('request')
         active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
+        creator_name = getattr(request.user, 'employee_name', 'System')
         
         # 2. Register it dynamically
         connect_to_db(active_db) 
@@ -260,38 +269,52 @@ class VendorSerializer(TenantSerializerMixin, serializers.ModelSerializer):
             
             # 3. Use active_db everywhere
             with transaction.atomic(using=active_db):
-                vendor_obj = vendor.objects.db_manager(active_db).create(**validated_data)
+                vendor_obj = vendor.objects.db_manager(active_db).create(created_by=creator_name, **validated_data)
                 
                 address.objects.db_manager(active_db).create(
-                    entity_type='vendor', entity_id=vendor_obj.id, **address_data
+                    entity_type='vendor', entity_id=vendor_obj.id,
+                    created_by=creator_name, 
+                    **address_data
                 )
                 
                 for contact in contacts_data:
-                    vendor_contact_person.objects.db_manager(active_db).create(vendor_id=vendor_obj.id, **contact)
+                    vendor_contact_person.objects.db_manager(active_db).create(
+                        vendor_id=vendor_obj.id, created_by=creator_name, **contact)
                 
                 vendor_obj._state.db = active_db
                 return vendor_obj
         finally:
             clear_current_db_name()
-
+            
     def update(self, instance, validated_data):
-        active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
-        connect_to_db(active_db)
-        
-        address_data = validated_data.pop('address', None)
-        
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save(using=active_db)
-        
-        if address_data:
-            addr_obj, _ = address.objects.db_manager(active_db).get_or_create(
-                entity_type='vendor', entity_id=instance.id
-            )
-            for attr, value in address_data.items():
-                setattr(addr_obj, attr, value)
-            addr_obj.save(using=active_db)
-        return instance
+            active_db = self.context['request'].user.tenant_db_name # Using the helper property we discussed
+            connect_to_db(active_db)
+            
+            # Pop nested data
+            address_data = validated_data.pop('address', None)
+            contacts_data = validated_data.pop('contacts', None)
+            
+            # Update Vendor fields
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save(using=active_db)
+            
+            # Update Address
+            if address_data:
+                addr_obj, _ = address.objects.db_manager(active_db).get_or_create(
+                    entity_type='vendor', entity_id=instance.id
+                )
+                for attr, value in address_data.items():
+                    setattr(addr_obj, attr, value)
+                addr_obj.save(using=active_db)
+                
+            # Update Contacts (Optional: replace existing contacts with new ones)
+            if contacts_data is not None:
+                vendor_contact_person.objects.db_manager(active_db).filter(vendor=instance).delete()
+                for contact in contacts_data:
+                    vendor_contact_person.objects.db_manager(active_db).create(vendor=instance, **contact)
+                    
+            return instance
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -307,4 +330,111 @@ class VendorSerializer(TenantSerializerMixin, serializers.ModelSerializer):
 
         contacts_qs = vendor_contact_person.objects.db_manager(active_db).filter(vendor=instance)
         ret['contacts'] = ContactPersonSerializer(contacts_qs, many=True).data
+        return ret
+    
+class PermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployeePermission
+        fields = ['module_name', 'can_view', 'can_create', 'can_edit', 'can_status']
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    permissions = serializers.SerializerMethodField()
+    address = AddressSerializer(required=False) # Use the existing serializer
+
+    class Meta:
+        model = Employee
+        fields = '__all__'
+        
+    def get_permissions(self, obj):
+        active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
+
+        perms = EmployeePermission.objects.using(active_db).filter(
+            employee_id=obj.id
+        )
+
+        return PermissionSerializer(perms, many=True).data
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        creator_name = getattr(request.user, 'employee_name', 'System')
+        # Pop nested data
+        permissions_data = validated_data.pop('permissions', [])
+        address_data = validated_data.pop('address', None)
+        password = validated_data.pop('password', 'defaultpassword') 
+        
+        with transaction.atomic(using=active_db):
+            # 1. Create Employee in Tenant DB
+            employee = Employee.objects.using(active_db).create(password=password, 
+                                                                created_by=creator_name, **validated_data)
+            
+            # 2. Save Permissions: Use employee_id to bypass Database Router
+            for perm in permissions_data:
+                EmployeePermission.objects.using(active_db).create(employee_id=employee.id,
+                                                                   created_by=creator_name, **perm)
+            
+            # 3. Save Address
+            if address_data:
+                address.objects.using(active_db).create(
+                    entity_type='employee', entity_id=employee.id,created_by=creator_name,  **address_data
+                )
+
+        # 4. Save to Master DB (Auth)
+        with transaction.atomic(using='default'):
+            if not register_employee.objects.using('default').filter(mobile_number=validated_data['contact_number']).exists():
+                register_employee.objects.using('default').create(
+                    mobile_number=validated_data['contact_number'],
+                    employee_name=validated_data['name'],
+                    company_name=validated_data.get('department', 'N/A'), 
+                    db_name=active_db,
+                    role=validated_data['role'],
+                    password=password 
+                )
+        return employee
+
+    def update(self, instance, validated_data):
+        active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        
+        permissions_data = validated_data.pop('permissions', None)
+        address_data = validated_data.pop('address', None)
+        
+        # Update Employee fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save(using=active_db)
+
+
+        if permissions_data is not None:
+            EmployeePermission.objects.using(active_db).filter(employee_id=instance.id).delete()
+            for perm in permissions_data:
+                EmployeePermission.objects.using(active_db).create(employee_id=instance.id, **perm)
+                
+        # Update Address
+        if address_data:
+            addr_obj, _ = address.objects.db_manager(active_db).get_or_create(
+                entity_type='employee', entity_id=instance.id
+            )
+            for attr, value in address_data.items():
+                setattr(addr_obj, attr, value)
+            addr_obj.save(using=active_db)
+                
+        return instance
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        active_db = self.context['request'].user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        
+        # Fetch Address
+        try:
+            addr_obj = address.objects.db_manager(active_db).get(entity_type='employee', entity_id=instance.id)
+            ret['address'] = AddressSerializer(addr_obj).data
+        except address.DoesNotExist:
+            ret['address'] = None
+
+        # Fetch Permissions
+
+        
         return ret

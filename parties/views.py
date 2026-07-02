@@ -7,9 +7,10 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.http import HttpResponse
 import pandas as pd
-from .models import customer, contact_person , vendor
-from .serializers import CustomerSerializer, ContactPersonSerializer ,VendorSerializer 
-from mysite.tenant_context import get_current_db_name , set_current_db_name
+from .models import customer, contact_person , vendor , Employee , EmployeePermission
+from .serializers import (CustomerSerializer, 
+ContactPersonSerializer ,VendorSerializer ,EmployeeSerializer , PermissionSerializer)
+from mysite.tenant_context import get_current_db_name , set_current_db_name ,clear_current_db_name
 from mysite.db_utils import connect_to_db
 
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -53,42 +54,53 @@ class CustomerViewSet(viewsets.ModelViewSet):
         file = request.FILES.get('file')
         if not file:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 1. Identify the Tenant DB
+        active_db = request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        set_current_db_name(active_db)
+
         try:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file)
             else:
                 df = pd.read_excel(file)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"Failed to read file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        active_tenant_db = get_current_db_name()
-        
-        with transaction.atomic(using=active_tenant_db):
-            for _, row in df.iterrows():
-                customer_data = {
-                    "customer_code": row['customer_code'],
-                    "name": row['name'],
-                    "email": str(row['email']) if pd.notna(row['email']) else None,
-                    "mobile": str(row['mobile']) if pd.notna(row['mobile']) else None,
-                    "address": {
-                        "line1": row['line1'],
-                        "city": row['city'],
-                        "state": row['state'],
-                        "pincode": row['pincode']
+        # 2. Wrap in transaction
+        try:
+            with transaction.atomic(using=active_db):
+                for _, row in df.iterrows():
+                    customer_data = {
+                        "customer_code": row['customer_code'],
+                        "name": row['name'],
+                        "email": str(row['email']) if pd.notna(row['email']) else None,
+                        "mobile": str(row['mobile']) if pd.notna(row['mobile']) else None,
+                        "address": {
+                            "line1": row['line1'],
+                            "city": row['city'],
+                            "state": row['state'],
+                            "pincode": row['pincode']
+                        }
                     }
-                }
-                
-                # Pass the request context down to bulk uploads so validators see the tenant DB configuration
-                serializer = CustomerSerializer(data=customer_data, context={'request': request})
-                
-                if serializer.is_valid():
-                    # FIXED: Removed (using=active_tenant_db) here as well
-                    serializer.save()
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"message": "Bulk upload successful!"}, status=status.HTTP_201_CREATED)
-    
+                    
+                    # 3. Context passing
+                    # The serializer's .create() method will now access 
+                    # the request.user to set 'created_by'
+                    serializer = CustomerSerializer(data=customer_data, context={'request': request})
+                    
+                    if serializer.is_valid():
+                        serializer.save()
+                    else:
+                        # Transaction will automatically rollback all previous rows on error
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({"message": "Bulk upload successful!"}, status=status.HTTP_201_CREATED)
+            
+        finally:
+            clear_current_db_name()
+            
     @action(detail=True, methods=['patch'])
     def toggle_status(self, request, pk=None):
         active_db = request.user.db_name.strip().replace(" ", "_")
@@ -138,34 +150,49 @@ class VendorViewSet(viewsets.ModelViewSet):
     def contacts(self, request, pk=None):
         vendor_obj = self.get_object()
         active_db = get_current_db_name()
-        contacts = contact_person.objects.using(active_db).filter(vendor_code=vendor_obj.id)
+        contacts = contact_person.objects.using(active_db).filter(vendor=vendor_obj)
         serializer = ContactPersonSerializer(contacts, many=True)
         return Response(serializer.data)
 
+
     @action(detail=False, methods=['post'])
     def bulk_upload(self, request):
+        active_db = request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        set_current_db_name(active_db)  # Ensures thread context for nested calls
+        
         file = request.FILES.get('file')
-        if not file: return Response({"error": "No file"}, status=400)
+        if not file:
+            return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             df = pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
+            
+            with transaction.atomic(using=active_db):  # Atomic rollback for partial failures
+                for _, row in df.iterrows():
+                    data = {
+                        "vendor_code": row['vendor_code'],
+                        "name": row['name'],
+                        "email": row.get('email'),
+                        "mobile": row.get('mobile'),
+                        "address": {
+                            "line1": row['line1'], 
+                            "city": row['city'], 
+                            "state": row['state'], 
+                            "pincode": row['pincode']
+                        }
+                    }
+                    serializer = VendorSerializer(data=data, context={'request': request})
+                    if serializer.is_valid():
+                        serializer.save()
+                    else:
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({"message": "Bulk upload successful!"}, status=status.HTTP_201_CREATED)
         except Exception as e:
-            return Response({"error": str(e)}, status=400)
-
-        active_db = get_current_db_name()
-        with transaction.atomic(using=active_db):
-            for _, row in df.iterrows():
-                data = {
-                    "vendor_code": row['vendor_code'],
-                    "name": row['name'],
-                    "address": {"line1": row['line1'], "city": row['city'], "state": row['state'], "pincode": row['pincode']}
-                }
-                serializer = VendorSerializer(data=data, context={'request': request})
-                if serializer.is_valid():
-                    serializer.save()
-                else:
-                    return Response(serializer.errors, status=400)
-        return Response({"message": "Bulk upload successful!"}, status=201)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        finally:
+            clear_current_db_name()  
     
     @action(detail=True, methods=['patch'])
     def toggle_status(self, request, pk=None):
@@ -184,3 +211,79 @@ class VendorViewSet(viewsets.ModelViewSet):
         writer = csv.writer(response)
         writer.writerow(['vendor_code', 'name', 'email', 'mobile', 'line1', 'city', 'state', 'pincode'])
         return response
+    
+class EmployeeViewSet(viewsets.ModelViewSet):
+    serializer_class = EmployeeSerializer
+
+    def get_queryset(self):
+        # 1. Identify the tenant
+        active_db = self.request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        # 2. Return queryset forced to tenant DB
+        return Employee.objects.using(active_db).all()
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    # Toggle status action
+    @action(detail=True, methods=['patch'])
+    def toggle_status(self, request, pk=None):
+        active_db = self.request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        employee = self.get_object()
+        employee.is_active = not employee.is_active
+        employee.save(using=active_db)
+        return Response({'status': 'success', 'is_active': employee.is_active})
+    
+    @action(detail=True, methods=['get'])
+    def list_permissions(self, request, pk=None):
+        active_db = self.request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+
+        employee = self.get_object()
+
+        permissions = EmployeePermission.objects.using(active_db).filter(
+            employee_id=employee.id
+        )
+
+        serializer = PermissionSerializer(permissions, many=True)
+        return Response(serializer.data)
+    # Template Download
+    @action(detail=False, methods=['get'])
+    def download_template(self, request):
+        df = pd.DataFrame(columns=['name', 'contact_number', 'department', 'role', 'email'])
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename="employee_template.xlsx"'
+        df.to_excel(response, index=False)
+        return response
+
+    # Bulk Upload
+    @action(detail=False, methods=['post'])
+    def bulk_upload(self, request):
+        active_db = self.request.user.db_name.strip().replace(" ", "_")
+        connect_to_db(active_db)
+        set_current_db_name(active_db) # Ensure context is set
+        
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            df = pd.read_excel(file)
+            with transaction.atomic(using=active_db):
+                for _, row in df.iterrows():
+                    # Ensure context is passed so created_by logic in Serializer works
+                    serializer = EmployeeSerializer(data=row.to_dict(), context={'request': request})
+                    if serializer.is_valid():
+                        serializer.save()
+                    else:
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'status': 'Bulk upload successful'})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        finally:
+            clear_current_db_name()
+ 
