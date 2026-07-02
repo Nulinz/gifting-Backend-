@@ -10,27 +10,32 @@ from .serializers import CompanyRegistrationSerializer
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed
 
-def provision_tenant_database(db_name):
-    """
-    Executes raw SQL to create the isolated physical database cluster shell
-    and runs migrations programmatically against it.
-    """
-    # 1. Create the physical database on your database server
-    with connection.cursor() as cursor:
-        cursor.execute(f"CREATE DATABASE {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;")
-    
-    # 2. Dynamically register the new database into Django's active DATABASES configuration
-    if db_name not in settings.DATABASES:
-        base_config = settings.DATABASES['default']
-        tenant_config = base_config.copy()
-        tenant_config['NAME'] = db_name
-        settings.DATABASES[db_name] = tenant_config
-        
-    # 3. Apply core framework contenttypes tracking first (Crucial step)
-    call_command('migrate', 'contenttypes', database=db_name, interactive=False, verbosity=0)
+from django.db import connections
 
-    # 4. FIXED: Target only 'parties' and omit the 'auth' app to stop empty table bloat/errors
-    call_command('migrate', 'parties', database=db_name, interactive=False, verbosity=0)
+from mysite.tenant_context import set_current_db_name, clear_current_db_name # Ensure these are imported
+
+def provision_tenant_database(db_name):
+    # 1. Create the physical database
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;")
+    
+    # 2. Dynamically update Django settings
+    if db_name not in settings.DATABASES:
+        base_config = settings.DATABASES['default'].copy()
+        base_config['NAME'] = db_name
+        settings.DATABASES[db_name] = base_config
+        connections.configure_settings(settings.DATABASES)
+
+    # 3. SET THE CONTEXT so the Router knows where to allow the migration
+    set_current_db_name(db_name)
+    
+    try:
+        # 4. Apply migrations
+        call_command('migrate', 'contenttypes', database=db_name, interactive=False, verbosity=0)
+        call_command('migrate', 'parties', database=db_name, interactive=False, verbosity=0)
+    finally:
+        # 5. ALWAYS clear the context after finishing
+        clear_current_db_name()
 
 
 class CompanyRegistrationView(generics.CreateAPIView):
@@ -68,13 +73,13 @@ class CompanyRegistrationView(generics.CreateAPIView):
                 )
 
                 # Create the owner profile as the first entry in the Master Employee table
-                # register_employee.objects.create_user(
-                #     mobile_number=data['mobile_number'],
-                #     employee_name=data['full_name'],
-                #     company_name=data['company_name'],
-                #     db_name=db_name,
-                #     password=data['password']
-                # )
+                register_employee.objects.create_user(
+                    mobile_number=data['mobile_number'],
+                    employee_name=data['full_name'],
+                    company_name=data['company_name'],
+                    db_name=db_name,
+                    password=data['password']
+                )
 
             # 2. FIXED: Create the database and migrate AFTER master records are safely committed
             provision_tenant_database(db_name)
